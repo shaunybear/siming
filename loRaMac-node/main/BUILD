@@ -1,5 +1,5 @@
 cc_binary(
-    name = "main",
+    name = "loRaMac-node",
     srcs = ["main.cpp"],
     deps = ["//mac:mac"],
     copts =["-Imac -Imac/lmhandler/packages -Imac/lmhandler -Isystem -Iradio"],
