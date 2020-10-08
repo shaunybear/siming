@@ -3,6 +3,8 @@ FROM golang:1.15.2-buster
 # Avoid warnings by switching to noninteractive
 ENV DEBIAN_FRONTEND=noninteractive
 
+ENV ZMQ_DEVICE_SERVER=tcp://localhost/9999
+
 ARG USER_ID=1000
 ARG GROUP_ID=1000
 ARG USERNAME=simmer
@@ -17,10 +19,11 @@ RUN apt-get update \
     && apt-get -y install  sudo \ 
     && echo  $USERNAME ALL=\(root\) NOPASSWD:ALL > /etc/sudoers.d/$USERNAME \
     && chmod 0440 /etc/sudoers.d/$USERNAME \
+    # simulator dependencies 
+    && apt-get -y install software-properties-common cmake
     # Cleanup
     && apt-get autoremove -y \
     && apt-get clean -y \
     && rm -rf /var/lib/apt/lists/*
-
 
 USER simmer
