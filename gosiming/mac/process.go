@@ -10,18 +10,16 @@ import (
 type ProcessMac struct {
 	executable string
 	cmd        *exec.Cmd
-	macState
+	macBackend
 }
 
 // NewProcessMac Return MAC Instance
-func NewProcessMac(deveui string, executable string) *ProcessMac {
-	m := &ProcessMac{
-		executable: executable,
-		macState: macState{
-			deveui: deveui,
-			ready:  false,
-			rpc:    rpc.NewRPCRequest()}}
-	return m
+func NewProcessMac(deveui string, executable string) (mac *ProcessMac, err error) {
+	backend, err := newMacBackend(deveui)
+
+	mac = &ProcessMac{executable: executable, macBackend: backend}
+
+	return mac, err
 }
 
 // Start the MAC
@@ -30,7 +28,7 @@ func (mac *ProcessMac) Start() (err error) {
 	mac.cmd.Env = append(os.Environ(),
 		fmt.Sprintf("MAC_RPC_BACKEND_ADDRESS=%s", rpcBackEnd))
 
-	rpc.AddService(mac)
+	rpc.AddBackend(mac)
 	return mac.cmd.Start()
 }
 

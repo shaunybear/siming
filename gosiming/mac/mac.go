@@ -23,38 +23,57 @@ type Mac interface {
 	Start() error
 	Stop()
 	DevEui() string
-	Ready() bool
-	SetReady(isReady bool)
+	IsConnected() bool
+	SetConnectedState(connected bool)
+	Request(command string) (reply string, err error)
 }
 
-type macState struct {
-	deveui string
-	ready  bool
-	rpc    *RPCRequest
+type macBackend struct {
+	deveui    string
+	identity  string
+	connected bool
+	rpc       *RPCRequest
 }
 
-func (mac *macState) SetReady(ready bool) {
-	fmt.Printf("[%s] ready=%v\n", mac.deveui, ready)
-	mac.ready = ready
+// NewMacBackend Construct a MAC Backend
+func newMacBackend(deveui string) (backend macBackend, err error) {
+
+	backend = macBackend{
+		deveui:    deveui,
+		connected: false,
+		rpc:       rpc.NewRPCRequest(),
+	}
+
+	return backend, nil
 }
 
-func (mac *macState) DevEui() string {
+func (mac *macBackend) SetConnectedState(connected bool) {
+	fmt.Printf("Set mac backend %s connected %v => %v\n", mac.deveui, mac.connected, connected)
+	mac.connected = connected
+}
+
+func (mac macBackend) IsConnected() bool {
+	return mac.connected
+}
+
+func (mac macBackend) DevEui() string {
 	return mac.deveui
 }
 
-// Name Service interface
-func (mac *macState) Name() string {
+// Backend Identity
+func (mac macBackend) Identity() string {
 	return mac.deveui
-}
-
-func (mac *macState) Ready() bool {
-	return mac.ready
 }
 
 // Command Send MAC command and return the response
-func (mac *macState) Command(cmd string) (response string, err error) {
-	response, err = mac.rpc.Send(mac.deveui, cmd)
-	return response, err
+func (mac macBackend) Request(cmd string) (reply string, err error) {
+	// Check the backend is connected
+	if !mac.IsConnected() {
+		return "", fmt.Errorf(fmt.Sprintf("%s is not connected", mac.deveui))
+	}
+
+	return mac.rpc.Send(mac.deveui, cmd)
+
 }
 
 // Run Initializes and starts MAC services
@@ -76,18 +95,27 @@ func Run() error {
 	return err
 }
 
-// AddLoRaMacNode Add a Node configured with the LoRaMac-node stack
-func AddLoRaMacNode(deveui string) Mac {
-	mac := NewProcessMac(deveui, loraMacNodeExecutable)
+// StartLoRaMac Add a Node configured with the LoRaMac-node stack
+func StartLoRaMac(deveui string) (mac Mac, err error) {
+	mac, err = NewProcessMac(deveui, loraMacNodeExecutable)
+	if err == nil {
+		err = mac.Start()
+	}
+
 	macs[deveui] = mac
-	return mac
+	return mac, err
 }
 
-// AddInProcMac Adds an Inproc  test MAC for testing obviously
-func AddInProcMac(deveui string, f InProcMacFunc) Mac {
-	mac := NewInProcMac(deveui, f)
+// StartInProcMac  Adds an Inproc  test MAC for testing obviously
+func StartInProcMac(deveui string, f InProcMacFunc) (mac Mac, err error) {
+	mac, err = NewInProcMac(deveui, f)
+
+	if err == nil {
+		err = mac.Start()
+	}
+
 	macs[deveui] = mac
-	return mac
+	return mac, err
 }
 
 // Get Returns Node instance

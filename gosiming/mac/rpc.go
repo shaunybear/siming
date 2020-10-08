@@ -6,6 +6,7 @@ package mac
 
 import (
 	"fmt"
+	"sync"
 	"time"
 
 	zmq "github.com/pebbe/zmq4"
@@ -13,7 +14,7 @@ import (
 
 // Constants
 const (
-	ServiceReady = "\001" //  Signals service is ready
+	BackendReady = "\001" //  Signals service is ready
 )
 
 // RPC  Sends requests to backend service and returns responses to requestor
@@ -21,15 +22,17 @@ type RPC struct {
 	frontend  *zmq.Socket //  Listen to clients
 	backend   *zmq.Socket //  Listen to services
 	reactor   *zmq.Reactor
-	services  map[string]Service
+	backends  map[string]Backend
 	bendpoint string
 	fendpoint string
+	mux       sync.Mutex
 }
 
-// Service defines the service interface used to track service state
-type Service interface {
-	Name() string
-	SetReady(status bool)
+// Backend defines the interface used to track backend service
+type Backend interface {
+	Identity() string
+	SetConnectedState(status bool)
+	IsConnected() bool
 }
 
 // RPCRequest RPC Requester
@@ -50,18 +53,14 @@ func NewRPC(frontend string, backend string) (rpc *RPC, err error) {
 		return nil, err
 	}
 
-	fmt.Printf("RPC bind frontend: %s\n", frontend)
 	err = fsock.Bind(frontend)
 	if err != nil {
-		fmt.Printf("RPC bind frontend %s error %s\n", frontend, err)
 		return nil, err
 	}
 
-	fmt.Printf("RPC bind backend: %s\n", backend)
 	bsock, err := zmq.NewSocket(zmq.ROUTER)
 	err = bsock.Bind(backend)
 	if err != nil {
-		fmt.Printf("RPC bind backend %s error %s\n", backend, err)
 		return nil, err
 	}
 
@@ -70,7 +69,7 @@ func NewRPC(frontend string, backend string) (rpc *RPC, err error) {
 		reactor:   zmq.NewReactor(),
 		fendpoint: frontend,
 		bendpoint: backend,
-		services:  make(map[string]Service)}
+		backends:  make(map[string]Backend)}
 
 	return b, nil
 }
@@ -80,27 +79,17 @@ func NewRPC(frontend string, backend string) (rpc *RPC, err error) {
 //  for the frontend, one for the backend:
 
 //handleFrontEnd Handles input from frontend
-// func handleFrontend(fsock *zmq.Socket, bsock *zmq.Socket) error {
 func handleFrontend(rpc *RPC) error {
 	//  Get client request, routed with identity added by client
 	msg, err := rpc.frontend.RecvMessage(0)
-	// msg, err := fsock.RecvMessage(0)
 	if err != nil {
 		return err
 	}
 
 	client, msg := unwrap(msg)
-	service, msg := unwrap(msg)
+	backend, msg := unwrap(msg)
 
-	fmt.Printf("[FRONTEND] request to %s\n", service)
-	/*
-		bsock.Send(service, zmq.SNDMORE)
-		bsock.Send("", zmq.SNDMORE)
-		bsock.Send(client, zmq.SNDMORE)
-		bsock.Send("", zmq.SNDMORE)
-		bsock.Send(msg[0], 0) */
-
-	rpc.backend.Send(service, zmq.SNDMORE)
+	rpc.backend.Send(backend, zmq.SNDMORE)
 	rpc.backend.Send("", zmq.SNDMORE)
 	rpc.backend.Send(client, zmq.SNDMORE)
 	rpc.backend.Send("", zmq.SNDMORE)
@@ -114,31 +103,35 @@ func handleFrontend(rpc *RPC) error {
 func handleBackend(rpc *RPC) error {
 
 	msg, err := rpc.backend.RecvMessage(0)
-	// msg, err := bsock.RecvMessage(0)
 	if err != nil {
+		fmt.Printf("[BACKEND] RecvMessage error %v\n", err)
 		return err
 	}
-	service, msg := unwrap(msg)
+	backend, msg := unwrap(msg)
 
 	//  Forward message to client if it's not a READY
-	if msg[0] != ServiceReady {
+	if msg[0] != BackendReady {
 		rpc.frontend.SendMessage(msg)
 	} else {
-		s, _ := rpc.services[service]
-		if s != nil {
-			s.SetReady(true)
+		rpc.mux.Lock()
+		b, _ := rpc.backends[backend]
+		if b != nil {
+			b.SetConnectedState(true)
 		} else {
-			fmt.Printf("[BACKEND] received ready state from unadded service %s\n", service)
+			fmt.Printf("[BACKEND] received connected from unknown backend %s\n", backend)
 		}
+		rpc.mux.Unlock()
 	}
 
 	return nil
 }
 
-// AddService Adds RPC service
-func (rpc *RPC) AddService(service Service) {
-	service.SetReady(false)
-	rpc.services[service.Name()] = service
+// AddBackend Adds RPC service
+func (rpc *RPC) AddBackend(backend Backend) {
+	backend.SetConnectedState(false)
+	rpc.mux.Lock()
+	rpc.backends[backend.Identity()] = backend
+	rpc.mux.Unlock()
 }
 
 //Run Fires up the RPC Broker
@@ -179,20 +172,12 @@ func (rpc *RPC) NewRPCRequest() *RPCRequest {
 //Send Request
 func (request *RPCRequest) Send(service string, msg string) (reply string, err error) {
 	// Send request
-	fmt.Printf("[CLIENT] request to %s\n", service)
 	request.sock.Send(service, zmq.SNDMORE)
 	request.sock.Send("", zmq.SNDMORE)
 	request.sock.Send(msg, 0)
 
 	// Wait for reply
-	reply, err = request.sock.Recv(0)
-	if err != nil {
-		fmt.Printf("[CLIENT] reply from %s error %s\n", service, err)
-	} else {
-		fmt.Printf("[CLIENT] reply from %s = %s\n", service, reply)
-	}
-
-	return reply, err
+	return request.sock.Recv(0)
 }
 
 //  unwrap  pops frame off front of message and returns it as 'head'
@@ -200,6 +185,7 @@ func (request *RPCRequest) Send(service string, msg string) (reply string, err e
 //  Return remaining frames of message as 'tail'
 func unwrap(msg []string) (head string, tail []string) {
 	head = msg[0]
+
 	if len(msg) > 1 && msg[1] == "" {
 		tail = msg[2:]
 	} else {
