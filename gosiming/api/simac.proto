@@ -1,0 +1,118 @@
+syntax = "proto3";
+
+package siming;
+option go_package = "shaunybear/gosiming/internal/simac";
+
+service SiMac{
+
+    // Get Mac Details
+    rpc GetMacDetails(stream DevEui) returns (stream MacDetails) {}
+
+    // Create a MAC 
+    rpc Create(Commissioning) returns (MacReply) {}
+
+    // Delete a Mac  
+    rpc Delete(DevEui) returns (MacReply) {}
+
+    // Send stream Join Requests and returns stream the results
+    rpc Join(stream JoinRequest) returns (stream JoinReply) {}
+
+    // Accepts a stream of Mac configurations while receiving MacState updates
+    rpc Configure(stream ConfigRequest)  returns (stream MacReply) {}
+
+    // Accepts a stream of uplink requests while receiving completed uplink status
+    rpc SendUplink(stream UplinkRequest) returns (stream UplinkStatus) {}
+}
+
+// Mac reply codes
+enum MacReplyStatus {
+    SUCCESS = 0;
+    ERROR =1;
+    MAC_DOES_NOT_EXIST =2;
+}
+
+//  Datarate
+enum DataRate {
+    DR0 = 0;
+    DR1 = 1;
+    DR2 = 2;
+    DR3 = 3;
+    DR4 = 4;
+    DR5 = 5;
+}
+
+// LoRaWAN RX Slot 
+enum RxSlot {
+    RX1 = 0;
+    RX2 = 1;
+}
+
+enum DownlinkStatus {
+    OK = 0;
+    MIC_FAILED = 1;
+    WRONG_DEVADDR = 2;
+    FCNT_DOWN_GAP = 3;
+    BAD_MHDR = 4;
+}
+
+message MacReply {
+    MacReplyStatus status = 1;
+    string error_string = 2;
+}
+
+message DevEui {
+    string deveui =1;
+}
+
+message ABPConfig {
+    uint32 devaddr = 1;
+    string app_skey = 2;
+    string nwk_skey = 3;
+    uint32 fcnt_up = 4;
+    uint32 fcnt_down = 5;
+}
+
+message Commissioning {
+    string deveui = 1;
+    string appeui = 2;
+    string appkey = 3;
+}
+
+message ConfigRequest {
+    DataRate datarate = 1;
+}
+
+message DownlinkInfo  {
+    DownlinkStatus status = 1;
+    DataRate datarate = 2;
+    RxSlot rxslot  = 3;
+    string encrypted_frame = 4;
+    string decrypted_frame = 5;
+}
+
+message JoinRequest {
+    uint32 attempts = 1;
+    DataRate datarate = 2;
+    uint32 devnonce = 3;
+}
+
+message JoinReply {
+    bool joined = 1;
+    DownlinkInfo  downlink = 2;
+}
+
+message UplinkRequest {
+    string app_payload = 1;
+    DataRate datarate = 2;
+    bool confirmed = 3;
+}
+
+message UplinkStatus {
+    MacReply reply = 1;
+    DownlinkInfo downlink = 2;
+}
+
+message MacDetails {
+    DevEui deveui = 1;
+    MacReply  reply = 2;
+}
